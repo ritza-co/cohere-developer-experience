@@ -48,18 +48,20 @@ os.environ['COHERE_API_KEY'] = <your-api-key>
 
 ## Define tools
 
-Your agent will be equipped with the following tools. The model can pick between
+For the model to use custom tools, we define them locally and supply the model with information for using these functions. When the model makes any tool calls, it will use this information to create the appropriate function calls. 
+
+We will define some functions to perform the following actions: 
 
 - doing a search on the web
 - and/or retrieving data from a vector store
-- and/or using a python interpreter
+- and/or using a Python interpreter
 - and/or directly answering [ this tool comes out of the box! ]
 
-Plus the model can self-reflect.
+The model will analyze the user query and intelligently decide which tools are needed to best answer the query.
 
-#### Web search
+### Web search
 
-You can easily equip your agent with web search!
+The `langchain_community` package has some tools that are specifically designed for AI agents to use. We will use the `TavilySearchResults` tool from this package to create our class `TavilySearchInput`. 
 
 ```python PYTHON
 from langchain_community.tools.tavily_search import TavilySearchResults
@@ -77,9 +79,9 @@ class TavilySearchInput(BaseModel):
 internet_search.args_schema = TavilySearchInput
 ```
 
-#### Vector store
+### Vector store
 
-You can easily equip your agent with a vector store!
+The `langchain_community` library also has a tool for retrieving information from a vector store. We'll use it in conjunction with some other functions from LangChain to handle vector stores. 
 
 ```python PYTHON
 !pip --quiet install faiss-cpu tiktoken
@@ -120,6 +122,8 @@ vectorstore_retriever = vectorstore.as_retriever()
 
 ```
 
+We now have all the necessary functions to initialize an instance of the `create_retriever_tool` from the `langchain_community` library. 
+
 ```python PYTHON
 from langchain.tools.retriever import create_retriever_tool
 
@@ -130,9 +134,9 @@ vectorstore_search = create_retriever_tool(
 )
 ```
 
-#### Python interpreter tool
+### Python interpreter tool
 
-You can easily equip your agent with a python interpreter!
+The `langchain_community` library also has a predefined Python interpreter tool. We initialize  our instance of this tool: 
 
 ```python PYTHON
 from langchain.agents import Tool
@@ -151,9 +155,9 @@ class ToolInput(BaseModel):
 python_tool.args_schema = ToolInput
 ```
 
-#### Transform any Python function in a Tool
+### Transform any Python function in a Tool
 
-You can easily equip your agent with any Python function!
+In addition to writing custom tool functions for the model, we can also convert existing functions to tools Cohere models can use with the `@tool` decorator. 
 
 ```python PYTHON
 from langchain_core.tools import tool
@@ -183,6 +187,8 @@ random_operation_tool.args_schema = random_operation_inputs
 The model can smartly pick the right tool(s) for the user query, call them in any sequence, analyze the results and self-reflect.
 Once the model considers it has enough information to answer the user question, it generates the final answer.
 
+We use LangChain's ReAct agent to streamline this entire process. The ReAct agent passes the user input to the model, processes the necessary tool requests the model makes, and returns the final agent response. 
+
 ```python PYTHON
 from langchain.agents import AgentExecutor
 from langchain_cohere.react_multi_hop.agent import create_cohere_react_agent
@@ -210,7 +216,7 @@ agent_executor = AgentExecutor(agent=agent, tools=[internet_search, vectorstore_
 
 ## Ask a standalone question to the ReAct agent
 
-A question that requires using a predefined tool from Langchain
+Let's now interact the agent we just defined. We'll start with a question that requires using a predefined tool from Langchain:
 
 ```python PYTHON
 response = agent_executor.invoke({
@@ -399,7 +405,9 @@ Here are some fun facts about the Roman Empire:
 "Here are some tips for writing an essay:\n- Start with a question that spurs some response.\n- Don't choose a topic at random, make sure you have a way in, a new insight or approach.\n- You don't need a complete thesis, just a gap to explore.\n- You can get ideas by talking to people, reading, doing and building things, and going places and seeing things.\n- You can improve the quality of your ideas by increasing the breadth and depth of what goes in.\n- You can get breadth by reading and talking about a wide range of topics.\n- You can get depth by doing and having to solve problems.\n- You can also get ideas by talking to people who make you have new ideas.\n\nHere are some fun facts about the Roman Empire:\n- At its peak, the empire stretched from North Africa to Britain, reigning over 60 million people.\n- The story of Rome's warrior founder and the twins and their wolf step-mother was depicted on Rome's first coins.\n- The Crossing of the Rhine in 405/6 AD brought around 100,000 barbarians into the Empire."
 ```
 
-A question that requires the large language model to use a custom tool.
+As we can see in the agent output, the model makes use of different tool calls as required to answer the user query. It then generates a final answer based on the results obtained from the tool calls. 
+
+Let's now ask a question that requires the large language model to use a custom tool: 
 
 ```python PYTHON
 response = agent_executor.invoke({
@@ -449,7 +457,9 @@ The prime factors of 200 are <co: 10="">2 and 5</co:>.[0m
 "The result of the random operation is **200**. Here are some fun facts about the number 200:\n- It is the smallest base 10 unprimeable number, meaning it cannot be turned into a prime number by changing just one of its digits to any other digit.\n- According to Bullinger's study of biblical literature, the number 200 signifies 'insufficiency'.\n- The number 200 is an even composite number composed of two distinct primes.\n\nThe prime factors of 200 are 2 and 5."
 ```
 
-A question that requires the large language model to directly answer.
+We see in the output the model making a call to our custom-defined function, followed by a call to the LangChain web search function. It then generates the final answer based on the acquired information. 
+
+Finally, let's ask a question that requires the large language model to directly answer without making any tool calls:
 
 ```python PYTHON
 response = agent_executor.invoke({
@@ -482,7 +492,7 @@ Grounded answer: I'm an AI chatbot, so I don't have feelings as such, but I'm he
 
 ## Ask a more complex question to the ReAct agent
 
-A question that requires using multipe tools, in sequence
+We now ask the model a question that requires using multiple tools, in sequence:
 
 ```python PYTHON
 response = agent_executor.invoke({
@@ -517,9 +527,11 @@ Grounded answer: <co: 0,1,2,3,4="">Best Buy</co:>, which was founded as Sound of
 'Best Buy, which was founded as Sound of Music, went public in 1985. Its stock price in 2000 was between $5.93 and $16.24 and in 2010, it was between $20.27 and $31.24.'
 ```
 
+We see in the output how the agent manages to make the relevant tool calls in the correct sequence to generate the output. 
+
 ## Have a multi-turn conversation with the ReAct agent
 
-The chat history enables you to have multi-turn conversations with the ReAct agent.
+So far, we have only made single calls to the chat agent. We haven't provided any chat history to continue a conversation. Let's now provide a chat history and hold a multi-turn conversation: 
 
 ```python PYTHON
 from langchain_core.messages import HumanMessage, AIMessage
