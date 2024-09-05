@@ -48,18 +48,20 @@ os.environ['COHERE_API_KEY'] = <your-api-key>
 
 ## Define tools
 
-Your agent will be equipped with the following tools. The model can pick between
+For the model to use custom tools, we define them locally and supply the model with information for using these functions. When the model makes any tool calls, it will use this information to create the appropriate function calls. 
+
+We will define some functions to perform the following actions: 
 
 - doing a search on the web
 - and/or retrieving data from a vector store
-- and/or using a python interpreter
+- and/or using a Python interpreter
 - and/or directly answering [ this tool comes out of the box! ]
 
-Plus the model can self-reflect.
+The model will analyze the user query and intelligently decide which tools are needed to best answer the query.
 
-#### Web search
+### Web search
 
-You can easily equip your agent with web search!
+The `langchain_community` package has some tools that are specifically designed for AI agents to use. We will use the `TavilySearchResults` tool from this package to create our class `TavilySearchInput`. 
 
 ```python PYTHON
 from langchain_community.tools.tavily_search import TavilySearchResults
@@ -77,12 +79,12 @@ class TavilySearchInput(BaseModel):
 internet_search.args_schema = TavilySearchInput
 ```
 
-#### Vector store
+### Vector store
 
-You can easily equip your agent with a vector store!
+The `langchain_community` library also has a tool for retrieving information from a vector store. We'll use it in conjunction with some other functions from LangChain to handle vector stores. 
 
 ```python PYTHON
-!pip --quiet install faiss-cpu tiktoken
+!pip --quiet install faiss-cpu tiktoken beautifulsoup4
 ```
 
 ```txt title="Output"
@@ -97,7 +99,7 @@ from langchain_community.document_loaders import WebBaseLoader
 from langchain_community.vectorstores import FAISS
 from langchain_cohere import CohereEmbeddings
 
-embd = CohereEmbeddings()
+embd = CohereEmbeddings(model="embed-english-v3.0")
 
 urls = [
     "https://paulgraham.com/best.html",
@@ -120,6 +122,8 @@ vectorstore_retriever = vectorstore.as_retriever()
 
 ```
 
+We now have all the necessary functions to initialize an instance of the `create_retriever_tool` from the `langchain_community` library. 
+
 ```python PYTHON
 from langchain.tools.retriever import create_retriever_tool
 
@@ -130,9 +134,9 @@ vectorstore_search = create_retriever_tool(
 )
 ```
 
-#### Python interpreter tool
+### Python interpreter tool
 
-You can easily equip your agent with a python interpreter!
+The `langchain_community` library also has a predefined Python interpreter tool. We initialize our instance of this tool: 
 
 ```python PYTHON
 from langchain.agents import Tool
@@ -151,37 +155,39 @@ class ToolInput(BaseModel):
 python_tool.args_schema = ToolInput
 ```
 
-#### Transform any Python function in a Tool
+### Transform any Python function in a Tool
 
-You can easily equip your agent with any Python function!
+In addition to using predefined LLM tools, we can also convert existing functions to tools with the `@tool` decorator. 
+
+Let's supply the model with a function to check if a given number is a prime number: 
 
 ```python PYTHON
 from langchain_core.tools import tool
-import random
+import math
 
 @tool
-def random_operation_tool(a: int, b: int):
-  """Calculates a random operation between the inputs."""
-  coin_toss = random.uniform(0, 1)
-  if coin_toss > 0.5:
-    return {'output': a*b}
-  else:
-    return {'output': a+b}
+def is_prime_tool(a: int):
+  """Checks if the given input is a prime number and returns the answer."""
+  for i in range(2, int(math.sqrt(a)) + 1):
+     if (a%i) == 0:
+       return {'output': False}
+  return {'output': True}
 
-random_operation_tool.name = "random_operation" # use python case
-random_operation_tool.description = "Calculates a random operation between the inputs."
+is_prime_tool.name = "prime_checker" # use python case
+is_prime_tool.description = "Calculates if the provided number is a prime number or not."
 
 from langchain_core.pydantic_v1 import BaseModel, Field
-class random_operation_inputs(BaseModel):
-    a: int = Field(description="First input")
-    b: int = Field(description="Second input")
-random_operation_tool.args_schema = random_operation_inputs
+class is_prime_inputs(BaseModel):
+    a: int = Field(description="Input")
+is_prime_tool.args_schema = is_prime_inputs
 ```
 
 ## Create ReAct Agent
 
 The model can smartly pick the right tool(s) for the user query, call them in any sequence, analyze the results and self-reflect.
 Once the model considers it has enough information to answer the user question, it generates the final answer.
+
+We use LangChain's ReAct agent to streamline this entire process. The ReAct agent passes the user input to the model, processes the necessary tool requests the model makes, and returns the final agent response. 
 
 ```python PYTHON
 from langchain.agents import AgentExecutor
@@ -193,7 +199,7 @@ llm = ChatCohere(model="command-r-plus", temperature=0.3)
 
 preamble = """
 You are an expert who answers the user's question with the most relevant datasource. You are equipped with an internet search tool and a special vectorstore of information about how to write good essays.
-You also have a 'random_operation_tool' tool, you must use it to compute the random operation between two numbers.
+You also have a 'is_prime_tool' tool, you must use it to compute if a number is a prime number or not.
 """
 
 
@@ -201,16 +207,16 @@ prompt = ChatPromptTemplate.from_template("{input}")
 
 agent = create_cohere_react_agent(
     llm=llm,
-    tools=[internet_search, vectorstore_search, python_tool, random_operation_tool],
+    tools=[internet_search, vectorstore_search, python_tool, is_prime_tool],
     prompt=prompt,
 )
 
-agent_executor = AgentExecutor(agent=agent, tools=[internet_search, vectorstore_search, python_tool, random_operation_tool], verbose=True)
+agent_executor = AgentExecutor(agent=agent, tools=[internet_search, vectorstore_search, python_tool, is_prime_tool], verbose=True)
 ```
 
 ## Ask a standalone question to the ReAct agent
 
-A question that requires using a predefined tool from Langchain
+Let's now interact with the agent we just defined. We'll start with a question that requires using a predefined tool from Langchain:
 
 ```python PYTHON
 response = agent_executor.invoke({
@@ -399,57 +405,52 @@ Here are some fun facts about the Roman Empire:
 "Here are some tips for writing an essay:\n- Start with a question that spurs some response.\n- Don't choose a topic at random, make sure you have a way in, a new insight or approach.\n- You don't need a complete thesis, just a gap to explore.\n- You can get ideas by talking to people, reading, doing and building things, and going places and seeing things.\n- You can improve the quality of your ideas by increasing the breadth and depth of what goes in.\n- You can get breadth by reading and talking about a wide range of topics.\n- You can get depth by doing and having to solve problems.\n- You can also get ideas by talking to people who make you have new ideas.\n\nHere are some fun facts about the Roman Empire:\n- At its peak, the empire stretched from North Africa to Britain, reigning over 60 million people.\n- The story of Rome's warrior founder and the twins and their wolf step-mother was depicted on Rome's first coins.\n- The Crossing of the Rhine in 405/6 AD brought around 100,000 barbarians into the Empire."
 ```
 
-A question that requires the large language model to use a custom tool.
+As we can see in the agent output, the model makes use of different tool calls as required to answer the user query. It then generates a final answer based on the results obtained from the tool calls. 
+
+Let's now ask a question that requires the large language model to use our custom tool: 
 
 ```python PYTHON
 response = agent_executor.invoke({
-    "input": "Calculate the result of the random operation of 10 and 20. Then find a few fun facts about that number, as well as its prime factors.",
+    "input": "Calculate if the number 397 is a prime number. Then find a few fun facts about that number. If it's not a prime number, mention some of its factors.",
     "preamble": preamble,
 })
 
 response['output']
-
 ```
 
 ```txt title="Output"
+
+
 [1m> Entering new AgentExecutor chain...[0m
 [32;1m[1;3m
-First, I will calculate the result of the random operation between 10 and 20. Then, I will search for fun facts about that number and its prime factors.
-{'tool_name': 'random_operation_tool', 'parameters': {'a': 10, 'b': 20}}
-[0mrandom_operation_tool is not a valid tool, try one of [internet_search, vectorstore_search, python_interpreter, random_operation].[32;1m[1;3m
-I received an error message when trying to use the random_operation_tool. I will now try using the python_interpreter tool to calculate the random operation between 10 and 20.
-{'tool_name': 'python_interpreter', 'parameters': {'code': "import random\n\n# Define the two numbers\na = 10\nb = 20\n\n# Calculate the random operation\nresult = random.choice(['+', '-', '*', '/'])\n\n# Perform the operation\nif result == '+':\n    answer = a + b\nelif result == '-':\n    answer = a - b\nelif result == '*':\n    answer = a * b\nelif result == '/':\n    answer = a / b\n\nprint(f'The result of the random operation is {answer:.0f}')"}}
-[0m[38;5;200m[1;3mThe result of the random operation is 200
-[0m[32;1m[1;3m
-The result of the random operation is 200. Now I will search for fun facts about the number 200 and its prime factors.
-{'tool_name': 'internet_search', 'parameters': {'query': 'fun facts about the number 200'}}
-[0m[36;1m[1;3m[{'url': 'https://www.express.co.uk/life-style/top10facts/690340/Top-10-facts-number-200', 'content': "Top 10 facts about the number 200 TODAY is the 200th day of 2016, so to celebrate let's have some facts about the number 200. By WILLIAM HARTSTON. 00:01, Mon, Jul 18, 2016."}, {'url': 'https://en.wikipedia.org/wiki/200_(number)', 'content': "The number appears in the Padovan sequence, preceded by 86, 114, 151 (it is the sum of the first two of these). The sum of Euler's totient function φ(x) over the first twenty-five integers is 200. 200 is the smallest base 10 unprimeable number - it cannot be turned into a prime number by changing just one of its digits to any other digit."}, {'url': 'https://www.archimedes-lab.org/numbers/Num70_200.html', 'content': "With 189 pages filled with an incredible variety of fun facts on numbers (and their peculiar properties), both mathematical and cultural, as well as tantalizing problems and anecdotes, there is much to learn for everyone. ... The number 200, according to Bullinger's study of biblical literature, signifies 'insufficiency'. The word 200 (ducenti) ..."}, {'url': 'https://owlcation.com/misc/Over-200-Odd-Facts-Did-You-Know-Them', 'content': "Over 200 odd facts about science, sports, history and more that you and your friends probably don't already know! ... Strange and Interesting Facts. ... Average number of people airborne over the U.S. at any given hour: 61,000. Portion of land in the U.S. owned by the government: 1/3. Ninety percent of New York City cabbies are recently arrived ..."}, {'url': 'https://numbermatics.com/n/200/', 'content': 'Mathematical info, prime factorization, fun facts and numerical data for STEM, education and fun. Your guide to the number 200, an even composite number composed of two distinct primes. Mathematical info, prime factorization, fun facts and numerical data for STEM, education and fun. ... Number 200 - Facts about the integer. Retrieved 2 April ...'}][0m[32;1m[1;3m
-{'tool_name': 'internet_search', 'parameters': {'query': 'prime factors of 200'}}
-[0m[36;1m[1;3m[{'url': 'https://www.cuemath.com/numbers/factors-of-200/', 'content': 'Therefore, the factors of 200 are 1, 2, 4, 5, 8, 10, 20, 25, 40, 50, 100, and 200. Which means the number 200 is an even composite number.'}, {'url': 'https://byjus.com/maths/factors-of-200/', 'content': "The factors of 200 are 1, 2, 4, 5, 8, 10, 20, 25, 40, 50, 100 and 200. Visit BYJU'S to learn the pair factors and the prime factors of 200 with complete\xa0..."}, {'url': 'https://byjus.com/us/math/factors-of-200/', 'content': 'The factors of 200 are 1, 2, 4, 5, 8, 10, 20, 25, 40, 50, 100 and 200 because all these numbers divide the number 200 evenly.'}, {'url': 'https://homework.study.com/explanation/what-is-the-prime-factorization-of-200-using-exponents.html', 'content': 'The prime factorization of 200 using exponents is 2 3 ∗ 5 2 . First, we need to find the prime factorization of 200. 200 = 2 ∗ 100. 200 = 2 ∗ 2 ∗ 50.'}][0m[32;1m[1;3mRelevant Documents: 1,3,4,6,7,8,9,10
-Cited Documents: 1,3,4,6,7,8,9,10
-Answer: The result of the random operation is **200**. Here are some fun facts about the number 200:
-- It is the smallest base 10 unprimeable number, meaning it cannot be turned into a prime number by changing just one of its digits to any other digit.
-- According to Bullinger's study of biblical literature, the number 200 signifies 'insufficiency'.
-- The number 200 is an even composite number composed of two distinct primes.
-
-The prime factors of 200 are 2 and 5.
-Grounded answer: The result of the random operation is *<co: 1="">*200</co:>**. Here are some fun facts about the number 200:
-- It is the <co: 3="">smallest base 10 unprimeable number</co:>, meaning it <co: 3="">cannot be turned into a prime number by changing just one of its digits to any other digit</co:>.
-- According to <co: 4="">Bullinger's study of biblical literature</co:>, the number 200 signifies <co: 4="">'insufficiency</co:>'.
-- The number 200 is an <co: 6,7="">even</co:> <co: 6,7,9="">composite number</co:> composed of <co: 6="">two distinct primes</co:>.
-
-The prime factors of 200 are <co: 10="">2 and 5</co:>.[0m
+First, I will use the is_prime_tool to check if 397 is a prime number. Then, I will search for fun facts about the number 397.
+{'tool_name': 'prime_checker', 'parameters': {'a': 397}}
+[0m[36;1m[1;3m{'output': True}[0m[32;1m[1;3m
+I have found out that 397 is a prime number. Now I will search for fun facts about the number 397.
+{'tool_name': 'internet_search', 'parameters': {'query': 'fun facts about the number 397'}}
+[0m[36;1m[1;3m[{'url': 'https://numeraly.com/about-the-number-397/', 'content': 'Fun and interesting facts about the number 397. The number 397 is a prime number, meaning it can only be divided by 1 and itself without leaving a remainder. It is the 78th prime number in the sequence. Additionally, 397 is a palindromic prime in base 14, as its representation in this base is 1C1, which reads the same backward and forward.'}, {'url': 'https://numbersinfo.pro/397', 'content': '397 is an odd 3-digits prime number following 396 and preceding 398. In scientific notation, it is written as 3.97 × 10^2. The sum of its digits is 19. ... Interesting facts. 397 has 2 divisors, whose sum is 398; The reverse of 397 is 793; Previous prime number is 1; Basic properties. Is Prime? yes; Number parity odd;'}, {'url': 'https://number.academy/397', 'content': 'The meaning of the number 397: How is 397 spell, written in words, interesting facts, mathematics, computer science, numerology, codes. 397 in Roman Numerals and images. ... If you know something interesting about the number 397 or any other natural number (positive integer), please write to us here or on Facebook. Name *'}, {'url': 'https://www.numberempire.com/397', 'content': 'The prime number after 397 is 401. Number 397 has 2 divisors: 1, 397. Sum of the divisors is 398. Number 397 is not a Fibonacci number. It is not a Bell number. Number 397 is not a Catalan number. Number 397 is not a regular number (Hamming number). It is a not factorial of any number. Number 397 is a deficient number and therefore is not a ...'}, {'url': 'https://numbermatics.com/n/397/', 'content': '397 seconds is equal to 6 minutes, 37 seconds. To count from 1 to 397 would take you about three minutes. This is a very rough estimate, based on a speaking rate of half a second every third order of magnitude. If you speak quickly, you could probably say any randomly-chosen number between one and a thousand in around half a second.'}][0m[32;1m[1;3mRelevant Documents: 0,1,2,4,5
+Cited Documents: 0,1,2,4,5
+Answer: Yes, 397 is a prime number. It is the 78th prime number in the sequence and is a palindromic prime in base 14, as its representation in this base is 1C1, which reads the same backward and forward. It is also an odd 3-digit prime number. Some other interesting facts about the number 397 include:
+- 397 seconds is equal to 6 minutes, 37 seconds.
+- To count from 1 to 397 would take you about three minutes.
+- The sum of its digits is 19.
+- The reverse of 397 is 793.
+Grounded answer: <co: 0>Yes</co: 0>, 397 is a prime number. It is the <co: 1>78th prime number in the sequence</co: 1> and is a <co: 1>palindromic prime in base 14</co: 1>, as its <co: 1>representation in this base is 1C1</co: 1>, which <co: 1>reads the same backward and forward</co: 1>. It is also an <co: 2>odd 3-digit prime number</co: 2>. Some other interesting facts about the number 397 include:
+- <co: 5>397 seconds is equal to 6 minutes, 37 seconds</co: 5>.
+- <co: 5>To count from 1 to 397 would take you about three minutes</co: 5>.
+- <co: 2>The sum of its digits is 19</co: 2>.
+- <co: 2>The reverse of 397 is 793</co: 2>.[0m
 
 [1m> Finished chain.[0m
 
 
 
-
-
-"The result of the random operation is **200**. Here are some fun facts about the number 200:\n- It is the smallest base 10 unprimeable number, meaning it cannot be turned into a prime number by changing just one of its digits to any other digit.\n- According to Bullinger's study of biblical literature, the number 200 signifies 'insufficiency'.\n- The number 200 is an even composite number composed of two distinct primes.\n\nThe prime factors of 200 are 2 and 5."
+'Yes, 397 is a prime number. It is the 78th prime number in the sequence and is a palindromic prime in base 14, as its representation in this base is 1C1, which reads the same backward and forward. It is also an odd 3-digit prime number. Some other interesting facts about the number 397 include:\n- 397 seconds is equal to 6 minutes, 37 seconds.\n- To count from 1 to 397 would take you about three minutes.\n- The sum of its digits is 19.\n- The reverse of 397 is 793.'
 ```
 
-A question that requires the large language model to directly answer.
+In the output, we see in the model making a call to our custom-defined function, followed by a call to the LangChain web search function. It then generates the final answer based on the acquired information. 
+
+Finally, let's ask a question that requires the large language model to directly answer without making any tool calls:
 
 ```python PYTHON
 response = agent_executor.invoke({
@@ -482,7 +483,7 @@ Grounded answer: I'm an AI chatbot, so I don't have feelings as such, but I'm he
 
 ## Ask a more complex question to the ReAct agent
 
-A question that requires using multipe tools, in sequence
+We now ask the model a question that requires using multiple tools, in sequence:
 
 ```python PYTHON
 response = agent_executor.invoke({
@@ -517,9 +518,11 @@ Grounded answer: <co: 0,1,2,3,4="">Best Buy</co:>, which was founded as Sound of
 'Best Buy, which was founded as Sound of Music, went public in 1985. Its stock price in 2000 was between $5.93 and $16.24 and in 2010, it was between $20.27 and $31.24.'
 ```
 
+We see in the output how the agent makes the relevant tool calls in the correct sequence to generate the output. 
+
 ## Have a multi-turn conversation with the ReAct agent
 
-The chat history enables you to have multi-turn conversations with the ReAct agent.
+So far, we have only made single calls to the chat agent. We haven't provided any chat history to continue a conversation. Let's now provide a chat history and hold a multi-turn conversation: 
 
 ```python PYTHON
 from langchain_core.messages import HumanMessage, AIMessage
